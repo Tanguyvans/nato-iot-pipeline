@@ -25,59 +25,66 @@ influx_client = InfluxDBClient(host=INFLUXDB_HOST, port=INFLUXDB_PORT, database=
 
 
 def decode_sensecap_payload(data_bytes):
-    """Decode SenseCAP S2120 weather station payload"""
+    """Decode SenseCAP S2120 weather station payload (firmware 2.0, fPort 3)"""
     values = {}
     
     try:
-        # SenseCAP S2120 uses measurement ID format
-        # Format: [MeasurementID (2 bytes)] [Value (variable)]
-        
-        i = 0
-        while i < len(data_bytes) - 2:
-            # Measurement ID is 2 bytes
-            if i + 2 > len(data_bytes):
-                break
-                
-            meas_id = struct.unpack('<H', data_bytes[i:i+2])[0]
-            i += 2
-            
-            # 0x004A (74) = Air Temperature (°C * 10)
-            if meas_id == 0x004A:
-                if i + 2 <= len(data_bytes):
-                    val = struct.unpack('<h', data_bytes[i:i+2])[0]
-                    values['temperature'] = val / 10.0
-                    i += 2
-                    
-            # 0x29D7 = might be pressure
-            elif meas_id == 0x29D7:
-                i += 4  # skip for now
-                
-            # 0x014B (331) = Wind Direction (degrees)
-            elif meas_id == 0x014B:
-                if i + 2 <= len(data_bytes):
-                    val = struct.unpack('<H', data_bytes[i:i+2])[0]
-                    values['wind_direction'] = val
-                    i += 2
-                    
-            # 0x4C27 or 0x274C = Barometric Pressure
-            elif meas_id == 0xCF27:
-                if i + 4 <= len(data_bytes):
-                    val = struct.unpack('<I', data_bytes[i:i+4])[0]
-                    values['pressure'] = val / 100.0
-                    i += 4
-                    
-            # 0xDC11 = might be rainfall
-            elif meas_id == 0xDC11:
-                if i + 2 <= len(data_bytes):
-                    val = struct.unpack('<H', data_bytes[i:i+2])[0]
-                    values['rainfall'] = val / 10.0
-                    i += 2
-            else:
-                i += 1  # skip unknown byte
-                
-        # If no values decoded, store raw hex
-        if not values:
+        if len(data_bytes) < 20 or data_bytes[0] != 0x4A:
             values['raw_hex'] = data_bytes.hex()
+            return values
+        
+        # Firmware 2.0 format (fPort 3):
+        # 4A 00 [temp 2B] [hum 2B] [light 4B] 4B [wind_dir 2B] [rain 4B] [pressure 4B] 4C [rain_acc 4B] [extra 2B]
+        
+        # Skip header 0x4A 0x00
+        i = 2
+        
+        # Temperature: 2 bytes, big-endian, value / 10 = °C
+        temp_raw = struct.unpack('>H', data_bytes[i:i+2])[0]
+        values['temperature'] = temp_raw / 100.0
+        i += 2
+        
+        # Humidity: 2 bytes (could be part of combined field)
+        hum_raw = struct.unpack('>H', data_bytes[i:i+2])[0]
+        values['humidity'] = hum_raw / 100.0
+        i += 2
+        
+        # Light: 4 bytes
+        light_raw = struct.unpack('>I', data_bytes[i:i+4])[0]
+        values['light'] = light_raw
+        i += 4
+        
+        # Separator 0x4B
+        if i < len(data_bytes) and data_bytes[i] == 0x4B:
+            i += 1
+        
+        # Wind direction: 2 bytes
+        if i + 2 <= len(data_bytes):
+            wind_dir = struct.unpack('>H', data_bytes[i:i+2])[0]
+            values['wind_direction'] = wind_dir
+            i += 2
+        
+        # Rainfall hourly: 4 bytes
+        if i + 4 <= len(data_bytes):
+            rain = struct.unpack('>I', data_bytes[i:i+4])[0]
+            values['rainfall'] = rain / 1000.0
+            i += 4
+        
+        # Pressure: 4 bytes (before 0x4C separator)
+        if i + 4 <= len(data_bytes):
+            pressure = struct.unpack('>I', data_bytes[i:i+4])[0]
+            values['pressure'] = pressure / 10.0  # hPa
+            i += 4
+            
+        # Separator 0x4C
+        if i < len(data_bytes) and data_bytes[i] == 0x4C:
+            i += 1
+            
+        # Rain accumulation: 4 bytes
+        if i + 4 <= len(data_bytes):
+            rain_acc = struct.unpack('>I', data_bytes[i:i+4])[0]
+            values['rain_accumulation'] = rain_acc / 1000.0
+            i += 4
             
     except Exception as e:
         print(f"SenseCAP decode error: {e}")
