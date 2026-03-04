@@ -147,7 +147,7 @@ def on_message(client, userdata, msg):
                     "snr": snr,
                     **sensor_values
                 },
-                "time": datetime.utcnow().isoformat()
+                "time": datetime.now(datetime.UTC).isoformat()
             }
             
             # Write to InfluxDB
@@ -162,7 +162,7 @@ def main():
     print("NATO IoT Pipeline starting...")
     
     # MQTT client
-    client = mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message
     
