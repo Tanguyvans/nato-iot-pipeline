@@ -114,9 +114,9 @@ def decode_payload(device_name, application_name, data_base64):
         return {}
 
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, reason_code, properties=None):
     """MQTT connect callback"""
-    print(f"Connected to MQTT broker (rc={rc})")
+    print(f"Connected to MQTT broker (rc={reason_code})")
     for topic in MQTT_TOPICS:
         client.subscribe(topic)
         print(f"Subscribed to {topic}")
