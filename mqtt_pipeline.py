@@ -29,45 +29,56 @@ def decode_sensecap_payload(data_bytes):
     values = {}
     
     try:
-        # SenseCAP S2120 format: starts with 0x4A
-        if len(data_bytes) < 20:
-            return values
+        # SenseCAP S2120 uses measurement ID format
+        # Format: [MeasurementID (2 bytes)] [Value (variable)]
+        
+        i = 0
+        while i < len(data_bytes) - 2:
+            # Measurement ID is 2 bytes
+            if i + 2 > len(data_bytes):
+                break
+                
+            meas_id = struct.unpack('<H', data_bytes[i:i+2])[0]
+            i += 2
             
-        # Byte 0: 0x4A (header)
-        # Bytes 1-2: Temperature (little-endian, 0.01°C)
-        temp_raw = struct.unpack('<H', data_bytes[1:3])[0]
-        values['temperature'] = temp_raw / 100.0
-        
-        # Bytes 3-4: Humidity (little-endian, 0.01%)
-        hum_raw = struct.unpack('<H', data_bytes[3:5])[0]
-        values['humidity'] = hum_raw / 100.0
-        
-        # Bytes 5-6: Light (lux)
-        light_raw = struct.unpack('<H', data_bytes[5:7])[0]
-        values['light'] = light_raw
-        
-        # Bytes 7-8: UV index (0.01)
-        uv_raw = struct.unpack('<H', data_bytes[7:9])[0]
-        values['uv_index'] = uv_raw / 100.0
-        
-        # Bytes 9-10: Wind speed (0.01 m/s)
-        wind_raw = struct.unpack('<H', data_bytes[9:11])[0]
-        values['wind_speed'] = wind_raw / 100.0
-        
-        # Byte 11: 0x4B (separator)
-        
-        # Bytes 12-13: Wind direction (degrees)
-        wind_dir = struct.unpack('<H', data_bytes[12:14])[0]
-        values['wind_direction'] = wind_dir
-        
-        # Bytes 14-17: Rainfall (0.001 mm)
-        rain_raw = struct.unpack('<I', data_bytes[14:18])[0]
-        values['rainfall'] = rain_raw / 1000.0
-        
-        # Bytes 18-21: Barometric pressure (0.01 hPa)
-        pressure_raw = struct.unpack('<I', data_bytes[18:22])[0]
-        values['pressure'] = pressure_raw / 100.0
-        
+            # 0x004A (74) = Air Temperature (°C * 10)
+            if meas_id == 0x004A:
+                if i + 2 <= len(data_bytes):
+                    val = struct.unpack('<h', data_bytes[i:i+2])[0]
+                    values['temperature'] = val / 10.0
+                    i += 2
+                    
+            # 0x29D7 = might be pressure
+            elif meas_id == 0x29D7:
+                i += 4  # skip for now
+                
+            # 0x014B (331) = Wind Direction (degrees)
+            elif meas_id == 0x014B:
+                if i + 2 <= len(data_bytes):
+                    val = struct.unpack('<H', data_bytes[i:i+2])[0]
+                    values['wind_direction'] = val
+                    i += 2
+                    
+            # 0x4C27 or 0x274C = Barometric Pressure
+            elif meas_id == 0xCF27:
+                if i + 4 <= len(data_bytes):
+                    val = struct.unpack('<I', data_bytes[i:i+4])[0]
+                    values['pressure'] = val / 100.0
+                    i += 4
+                    
+            # 0xDC11 = might be rainfall
+            elif meas_id == 0xDC11:
+                if i + 2 <= len(data_bytes):
+                    val = struct.unpack('<H', data_bytes[i:i+2])[0]
+                    values['rainfall'] = val / 10.0
+                    i += 2
+            else:
+                i += 1  # skip unknown byte
+                
+        # If no values decoded, store raw hex
+        if not values:
+            values['raw_hex'] = data_bytes.hex()
+            
     except Exception as e:
         print(f"SenseCAP decode error: {e}")
         values['raw_hex'] = data_bytes.hex()
