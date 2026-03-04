@@ -25,72 +25,85 @@ influx_client = InfluxDBClient(host=INFLUXDB_HOST, port=INFLUXDB_PORT, database=
 
 
 def decode_sensecap_payload(data_bytes):
-    """Decode SenseCAP S2120 weather station payload (firmware 2.0, fPort 3)"""
+    """Decode SenseCAP S2120 firmware 2.0 (fPort 3)"""
     values = {}
     
     try:
-        if len(data_bytes) < 20 or data_bytes[0] != 0x4A:
-            values['raw_hex'] = data_bytes.hex()
-            return values
+        # Convert to hex string
+        data = data_bytes.hex().upper()
         
-        # Firmware 2.0 format (fPort 3):
-        # 4A 00 [temp 2B] [hum 2B] [light 4B] 4B [wind_dir 2B] [rain 4B] [pressure 4B] 4C [rain_acc 4B] [extra 2B]
-        
-        # Skip header 0x4A 0x00
-        i = 2
-        
-        # Temperature: 2 bytes, big-endian, value / 10 = °C
-        temp_raw = struct.unpack('>H', data_bytes[i:i+2])[0]
-        values['temperature'] = temp_raw / 100.0
-        i += 2
-        
-        # Humidity: 2 bytes (could be part of combined field)
-        hum_raw = struct.unpack('>H', data_bytes[i:i+2])[0]
-        values['humidity'] = hum_raw / 100.0
-        i += 2
-        
-        # Light: 4 bytes
-        light_raw = struct.unpack('>I', data_bytes[i:i+4])[0]
-        values['light'] = light_raw
-        i += 4
-        
-        # Separator 0x4B
-        if i < len(data_bytes) and data_bytes[i] == 0x4B:
-            i += 1
-        
-        # Wind direction: 2 bytes
-        if i + 2 <= len(data_bytes):
-            wind_dir = struct.unpack('>H', data_bytes[i:i+2])[0]
-            values['wind_direction'] = wind_dir
-            i += 2
-        
-        # Rainfall hourly: 4 bytes
-        if i + 4 <= len(data_bytes):
-            rain = struct.unpack('>I', data_bytes[i:i+4])[0]
-            values['rainfall'] = rain / 1000.0
-            i += 4
-        
-        # Pressure: 4 bytes (before 0x4C separator)
-        if i + 4 <= len(data_bytes):
-            pressure = struct.unpack('>I', data_bytes[i:i+4])[0]
-            values['pressure'] = pressure / 10.0  # hPa
-            i += 4
+        i = 0
+        while i < len(data) - 2:
+            data_id = data[i:i+2]
             
-        # Separator 0x4C
-        if i < len(data_bytes) and data_bytes[i] == 0x4C:
-            i += 1
-            
-        # Rain accumulation: 4 bytes
-        if i + 4 <= len(data_bytes):
-            rain_acc = struct.unpack('>I', data_bytes[i:i+4])[0]
-            values['rain_accumulation'] = rain_acc / 1000.0
-            i += 4
-            
+            if data_id == '4A':
+                # 10 bytes (20 hex chars) after 4A
+                data_value = data[i+2:i+22]
+                if len(data_value) >= 20:
+                    # Temperature: first 4 hex chars, /10
+                    values['temperature'] = loraWANV2DataFormat(data_value[0:4], 10)
+                    # Humidity: next 2 hex chars
+                    values['humidity'] = loraWANV2DataFormat(data_value[4:6], 1)
+                    # Light: next 8 hex chars
+                    values['light'] = loraWANV2DataFormat(data_value[6:14], 1)
+                    # UV Index: next 2 hex chars, /10
+                    values['uv_index'] = loraWANV2DataFormat(data_value[14:16], 10)
+                    # Wind Speed: next 4 hex chars, /10
+                    values['wind_speed'] = loraWANV2DataFormat(data_value[16:20], 10)
+                i += 22
+                
+            elif data_id == '4B':
+                # 8 bytes (16 hex chars) after 4B
+                data_value = data[i+2:i+18]
+                if len(data_value) >= 16:
+                    # Wind Direction: first 4 hex chars
+                    values['wind_direction'] = loraWANV2DataFormat(data_value[0:4], 1)
+                    # Rainfall: next 8 hex chars, /1000
+                    values['rainfall'] = loraWANV2DataFormat(data_value[4:12], 1000)
+                    # Pressure: next 4 hex chars, /0.1 (multiply by 10)
+                    values['pressure'] = loraWANV2DataFormat(data_value[12:16], 0.1)
+                i += 18
+                
+            elif data_id == '4C':
+                # 6 bytes (12 hex chars) after 4C
+                data_value = data[i+2:i+14]
+                if len(data_value) >= 12:
+                    # Peak Wind Gust: first 4 hex chars, /10
+                    values['peak_wind_gust'] = loraWANV2DataFormat(data_value[0:4], 10)
+                    # Rain Accumulation: next 8 hex chars, /1000
+                    values['rain_accumulation'] = loraWANV2DataFormat(data_value[4:12], 1000)
+                i += 14
+                
+            else:
+                i += 2
+                
     except Exception as e:
         print(f"SenseCAP decode error: {e}")
         values['raw_hex'] = data_bytes.hex()
     
     return values
+
+
+def loraWANV2DataFormat(hex_str, divisor=1):
+    """Convert big-endian hex string to value with divisor"""
+    try:
+        # Big-endian transform (reverse bytes)
+        bytes_arr = [hex_str[i:i+2] for i in range(0, len(hex_str), 2)]
+        
+        # Convert to binary string
+        binary_str = ''.join(format(int(b, 16), '08b') for b in bytes_arr)
+        
+        # Check for negative (two's complement)
+        if binary_str[0] == '1':
+            # Invert bits and add 1
+            inverted = ''.join('0' if b == '1' else '1' for b in binary_str)
+            value = -(int(inverted, 2) + 1)
+        else:
+            value = int(binary_str, 2)
+        
+        return value / divisor
+    except:
+        return 0
 
 def decode_milesight_payload(data_bytes):
     """Decode Milesight EM310-UDL ultrasonic sensor payload"""
