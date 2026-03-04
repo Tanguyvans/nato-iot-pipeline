@@ -25,49 +25,53 @@ influx_client = InfluxDBClient(host=INFLUXDB_HOST, port=INFLUXDB_PORT, database=
 
 def decode_sensecap_payload(data_bytes):
     """Decode SenseCAP S2120 weather station payload"""
-    # SenseCAP uses a TLV-like format
-    # Documentation: https://sensecap-docs.seeed.cc/
     values = {}
     
-    i = 0
-    while i < len(data_bytes) - 2:
-        channel = data_bytes[i]
-        data_type = data_bytes[i + 1]
+    try:
+        # SenseCAP S2120 format: starts with 0x4A
+        if len(data_bytes) < 20:
+            return values
+            
+        # Byte 0: 0x4A (header)
+        # Bytes 1-2: Temperature (little-endian, 0.01°C)
+        temp_raw = struct.unpack('<H', data_bytes[1:3])[0]
+        values['temperature'] = temp_raw / 100.0
         
-        if channel == 0x00 and data_type == 0x00:  # Battery
-            values['battery'] = data_bytes[i + 2]
-            i += 3
-        elif channel == 0x01 and data_type == 0x01:  # Temperature (0.1°C)
-            temp = struct.unpack('>h', data_bytes[i+2:i+4])[0]
-            values['temperature'] = temp / 10.0
-            i += 4
-        elif channel == 0x02 and data_type == 0x02:  # Humidity (0.1%)
-            hum = struct.unpack('>H', data_bytes[i+2:i+4])[0]
-            values['humidity'] = hum / 10.0
-            i += 4
-        elif channel == 0x03 and data_type == 0x03:  # Light (lux)
-            values['light'] = struct.unpack('>I', data_bytes[i+2:i+6])[0]
-            i += 6
-        elif channel == 0x04 and data_type == 0x04:  # UV Index
-            values['uv_index'] = data_bytes[i + 2]
-            i += 3
-        elif channel == 0x05 and data_type == 0x05:  # Wind speed (0.1 m/s)
-            values['wind_speed'] = struct.unpack('>H', data_bytes[i+2:i+4])[0] / 10.0
-            i += 4
-        elif channel == 0x06 and data_type == 0x06:  # Wind direction (degrees)
-            values['wind_direction'] = struct.unpack('>H', data_bytes[i+2:i+4])[0]
-            i += 4
-        elif channel == 0x07 and data_type == 0x07:  # Rain (0.1 mm)
-            values['rainfall'] = struct.unpack('>H', data_bytes[i+2:i+4])[0] / 10.0
-            i += 4
-        elif channel == 0x08 and data_type == 0x08:  # Barometric pressure (0.1 hPa)
-            values['pressure'] = struct.unpack('>I', data_bytes[i+2:i+6])[0] / 10.0
-            i += 6
-        else:
-            i += 1  # Skip unknown byte
+        # Bytes 3-4: Humidity (little-endian, 0.01%)
+        hum_raw = struct.unpack('<H', data_bytes[3:5])[0]
+        values['humidity'] = hum_raw / 100.0
+        
+        # Bytes 5-6: Light (lux)
+        light_raw = struct.unpack('<H', data_bytes[5:7])[0]
+        values['light'] = light_raw
+        
+        # Bytes 7-8: UV index (0.01)
+        uv_raw = struct.unpack('<H', data_bytes[7:9])[0]
+        values['uv_index'] = uv_raw / 100.0
+        
+        # Bytes 9-10: Wind speed (0.01 m/s)
+        wind_raw = struct.unpack('<H', data_bytes[9:11])[0]
+        values['wind_speed'] = wind_raw / 100.0
+        
+        # Byte 11: 0x4B (separator)
+        
+        # Bytes 12-13: Wind direction (degrees)
+        wind_dir = struct.unpack('<H', data_bytes[12:14])[0]
+        values['wind_direction'] = wind_dir
+        
+        # Bytes 14-17: Rainfall (0.001 mm)
+        rain_raw = struct.unpack('<I', data_bytes[14:18])[0]
+        values['rainfall'] = rain_raw / 1000.0
+        
+        # Bytes 18-21: Barometric pressure (0.01 hPa)
+        pressure_raw = struct.unpack('<I', data_bytes[18:22])[0]
+        values['pressure'] = pressure_raw / 100.0
+        
+    except Exception as e:
+        print(f"SenseCAP decode error: {e}")
+        values['raw_hex'] = data_bytes.hex()
     
     return values
-
 
 def decode_milesight_payload(data_bytes):
     """Decode Milesight EM310-UDL ultrasonic sensor payload"""
