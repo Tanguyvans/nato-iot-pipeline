@@ -9,6 +9,7 @@ import struct
 from datetime import datetime
 import paho.mqtt.client as mqtt
 from influxdb import InfluxDBClient
+from datetime import datetime, timezone
 
 # Configuration
 MQTT_BROKER = "localhost"
@@ -151,7 +152,7 @@ def on_message(client, userdata, msg):
                     "snr": snr,
                     **sensor_values
                 },
-                "time": datetime.now(datetime.UTC).isoformat()
+                "time": datetime.now(timezone.utc).isoformat()
             }
             
             # Write to InfluxDB
