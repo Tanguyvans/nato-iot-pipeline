@@ -13,7 +13,7 @@ from influxdb import InfluxDBClient
 # Configuration
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
-MQTT_TOPICS = ["application/#", "zigbee2mqtt/0x#"]
+MQTT_TOPICS = ["application/#", "zigbee2mqtt/#"]
 
 INFLUXDB_HOST = "localhost"
 INFLUXDB_PORT = 8086
